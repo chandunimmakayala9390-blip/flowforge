@@ -142,6 +142,53 @@ Run:
 
 This runs the automated tests included in the project.
 
+## Project Structure
+
+```text
+flowforge/
+├── .mvn/
+│   └── wrapper/                  # Maven Wrapper configuration
+├── src/
+│   ├── main/
+│   │   ├── java/com/flowforge/
+│   │   │   ├── FlowforgeApplication.java
+│   │   │   └── core/
+│   │   │       ├── BackendProperties.java
+│   │   │       ├── BackendServer.java
+│   │   │       ├── BackendUnavailableException.java
+│   │   │       ├── GlobalExceptionHandler.java
+│   │   │       ├── HealthCheckService.java
+│   │   │       ├── LoadBalancer.java
+│   │   │       ├── LoadBalancerConfig.java
+│   │   │       ├── LoadBalancingStrategy.java
+│   │   │       ├── ProxyController.java
+│   │   │       └── ProxyService.java
+│   │   └── resources/
+│   │       └── application.properties
+│   └── test/
+│       └── java/com/flowforge/
+│           └── FlowforgeApplicationTests.java
+├── .gitignore
+├── HELP.md
+├── mvnw
+├── mvnw.cmd
+├── pom.xml
+└── README.md
+```
+
+### Key Components
+
+- **`LoadBalancer.java`** — Selects a backend according to the configured load-balancing strategy.
+- **`LoadBalancingStrategy.java`** — Defines the supported load-balancing strategies.
+- **`BackendServer.java`** — Represents a backend server and tracks its health and active connections.
+- **`HealthCheckService.java`** — Periodically checks backend health.
+- **`ProxyController.java`** — Exposes the HTTP proxy endpoint.
+- **`ProxyService.java`** — Forwards incoming requests to the selected backend.
+- **`BackendProperties.java`** — Binds backend configuration from application properties.
+- **`LoadBalancerConfig.java`** — Configures backend server instances.
+- **`GlobalExceptionHandler.java`** — Handles errors such as when no healthy backend is available.
+- **`application.properties`** — Configures backend URLs, weights, and load-balancing behavior.
+
 ## Future Improvements
 
 - Add automated unit and integration tests for all load-balancing strategies.
