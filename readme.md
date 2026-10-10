@@ -1,202 +1,142 @@
-# FlowForge — Configurable HTTP Load Balancer
+# FlowForge — Concurrent HTTP Load Balancer
 
-FlowForge is a Java-based HTTP load balancer built with Spring Boot. It forwards incoming HTTP requests to configured backend servers, supports multiple load-balancing strategies, and monitors backend health to help handle backend failures.
+FlowForge is a Java 25 and Spring Boot HTTP reverse proxy that distributes incoming requests across configured backend instances. This iteration focuses on concurrent request routing, bounded network waits, health monitoring, and failover for retry-safe requests.
 
 ## Features
 
-- **Round Robin:** Distributes requests across available backend servers in rotation.
-- **Weighted Round Robin:** Distributes requests according to configured backend weights.
-- **Least Connections:** Selects a backend based on its active connection count.
-- **Health Monitoring:** Periodically checks backend health using Spring Boot Actuator.
-- **Automatic Failover:** Skips unhealthy backends when selecting a server.
-- **HTTP Reverse Proxy:** Forwards requests to the selected backend.
-- **Query Parameter Forwarding:** Preserves query parameters when forwarding requests.
-- **Error Handling:** Returns HTTP 503 Service Unavailable when no healthy backend is available.
-- **Thread-Safe Connection Tracking:** Uses atomic counters to track active backend connections.
+- **Concurrent backend selection:** Atomic counters avoid serializing every request through one synchronized method.
+- **Three routing strategies:** Round Robin, Weighted Round Robin, and Least Connections.
+- **Concurrent health checks:** A bounded health-check pool probes backends independently.
+- **Health-aware routing:** Unhealthy backends are excluded from selection.
+- **Bounded timeouts:** Proxy and health-check calls use configurable connect/read timeouts.
+- **Conservative failover:** Retry-safe HTTP methods may try another backend after a transport failure. POST and PATCH are not automatically retried, avoiding possible duplicate side effects.
+- **HTTP reverse proxy:** Handles GET, HEAD, POST, PUT, DELETE, PATCH, and OPTIONS; preserves query strings and forwards end-to-end request/response headers.
+- **Graceful failure:** Returns HTTP 503 if no healthy backend is available or all allowed attempts fail.
 
-## Tech Stack
+Performance numbers are intentionally not claimed in this README until load tests have been run and recorded on a specific machine.
+
+## Tech stack
 
 - Java 25
 - Spring Boot 4
-- Spring MVC
-- Maven
+- Spring MVC and RestClient
 - Spring Boot Actuator
+- Maven Wrapper
 - JUnit 5
 
-## Prerequisites
+## Requirements
 
 - JDK 25
 - Git
-- A terminal or IDE such as Visual Studio Code
+- VS Code or another Java IDE
 
-The project includes the Maven Wrapper, so a separate Maven installation is not required.
+The repository includes the Maven Wrapper, so a separate Maven installation is not required.
 
-## Getting Started
+## Run locally on Windows
 
-### 1. Clone the repository
+Clone the repository:
 
-```bash
-git clone https://github.com/YOUR-USERNAME/flowforge.git
-cd flowforge
-```
+    git clone https://github.com/chandunimmakayala9390-blip/flowforge.git
+    cd flowforge
 
-Replace `YOUR-USERNAME` with your GitHub username.
+Run the tests and build the executable JAR:
 
-### 2. Build and test
+    .\mvnw.cmd clean test
+    .\mvnw.cmd package
 
-On Windows:
+Start the load balancer on port 8080:
 
-```cmd
-.\mvnw.cmd clean test
-```
+    java -jar target\flowforge-0.0.1-SNAPSHOT.jar
 
-To package the application as an executable JAR:
+Start each backend in a separate terminal:
 
-```cmd
-.\mvnw.cmd package
-```
+    java -jar target\flowforge-0.0.1-SNAPSHOT.jar --server.port=8081 --flowforge.backend.name=backend-1
 
-The generated JAR is located at:
+    java -jar target\flowforge-0.0.1-SNAPSHOT.jar --server.port=8082 --flowforge.backend.name=backend-2
 
-```text
-target/flowforge-0.0.1-SNAPSHOT.jar
-```
+Verify health and proxy requests:
 
-### 3. Start the load balancer
-
-```cmd
-java -jar target/flowforge-0.0.1-SNAPSHOT.jar
-```
-
-By default, the main application listens on port `8080`.
-
-### 4. Start backend servers
-
-Run these commands in separate terminals, using the same JAR.
-
-Backend 1:
-
-```cmd
-java -jar target/flowforge-0.0.1-SNAPSHOT.jar --server.port=8081 --flowforge.backend.name=backend-1
-```
-
-Backend 2:
-
-```cmd
-java -jar target/flowforge-0.0.1-SNAPSHOT.jar --server.port=8082 --flowforge.backend.name=backend-2
-```
-
-Ensure that the backend names and ports match the configuration in `application.properties`.
+    curl.exe http://localhost:8080/actuator/health
+    curl.exe "http://localhost:8080/proxy/backend-test?user=chandu"
 
 ## Configuration
 
-Backend servers, their URLs, weights, and the selected load-balancing strategy are configured in:
+All settings are in src/main/resources/application.properties.
 
-```text
-src/main/resources/application.properties
-```
+| Property | Default | Description |
+|---|---:|---|
+| flowforge.load-balancer.strategy | WEIGHTED_ROUND_ROBIN | ROUND_ROBIN, WEIGHTED_ROUND_ROBIN, or LEAST_CONNECTIONS |
+| flowforge.proxy.connect-timeout-ms | 1000 | Backend connection timeout in milliseconds |
+| flowforge.proxy.read-timeout-ms | 3000 | Backend response-read timeout in milliseconds |
+| flowforge.proxy.max-attempts | 2 | Maximum attempts for retry-safe methods |
+| flowforge.health-check.interval-ms | 5000 | Delay between health-check cycles |
+| flowforge.health-check.timeout-ms | 800 | Health-probe connect/read timeout |
 
-The available strategies are:
+FlowForge marks a backend unhealthy when a proxied transport request fails. The scheduled health checker can mark it healthy again after its Actuator health endpoint responds successfully.
 
-- `ROUND_ROBIN`
-- `WEIGHTED_ROUND_ROBIN`
-- `LEAST_CONNECTIONS`
+## Check distribution and failover
 
-Change the configured strategy and backend weights to experiment with request distribution.
+Send a series of requests:
 
-## Testing the Application
+    1..20 | ForEach-Object {
+      curl.exe -s http://localhost:8080/proxy/backend-test
+      Write-Output ""
+    }
 
-### Health endpoint
+Then stop one backend, wait for a health-check cycle, and send requests again. Requests should continue through the remaining healthy backend. If no usable backend is available, the proxy responds with HTTP 503.
 
-Open:
+## Load testing
 
-```text
-http://localhost:8080/actuator/health
-```
+For a reproducible concurrency test, use k6 or Apache JMeter to send traffic to:
 
-A healthy application should report an `UP` status.
+    http://localhost:8080/proxy/backend-test
 
-### Proxy endpoint
+Increase virtual users in stages—for example 10, 25, 50, then 100—and keep each run long enough to reach steady behavior (such as 60 seconds). Record:
 
-Open:
+- Throughput in requests per second
+- p50, p95, and p99 response latency
+- Error rate and HTTP status distribution
+- CPU and memory of the proxy and backend processes
 
-```text
-http://localhost:8080/proxy/backend-test?user=chandu
-```
+Keep the test machine, workload, duration, and backend count constant when comparing revisions. Only add measured throughput/latency figures to your resume after running the benchmark. Local results support comparisons on your machine; they do not guarantee production capacity.
 
-The response includes information about the backend that handled the request.
+## Tests
 
-### Failover
+Run all tests:
 
-Stop a backend process and send requests through the load balancer. The health checker can mark the stopped backend unhealthy, allowing requests to be routed to another healthy backend.
+    .\mvnw.cmd clean test
 
-If no healthy backend is available, the application returns HTTP 503 Service Unavailable.
+Load-balancer tests cover concurrent round-robin distribution, weighted distribution, least-connections selection, unhealthy-backend filtering, and the no-healthy-backend case.
 
-## Running Tests
+## Project structure
 
-Run:
+    flowforge/
+    ├── src/main/java/com/flowforge/
+    │   ├── FlowforgeApplication.java
+    │   └── core/
+    │       ├── BackendProperties.java
+    │       ├── BackendServer.java
+    │       ├── BackendTestController.java
+    │       ├── BackendUnavailableException.java
+    │       ├── GlobalExceptionHandler.java
+    │       ├── HealthCheckService.java
+    │       ├── LoadBalancer.java
+    │       ├── LoadBalancerConfig.java
+    │       ├── LoadBalancingStrategy.java
+    │       ├── ProxyController.java
+    │       └── ProxyService.java
+    ├── src/main/resources/application.properties
+    ├── src/test/java/com/flowforge/
+    └── pom.xml
 
-```cmd
-.\mvnw.cmd clean test
-```
+## Resume summary
 
-This runs the automated tests included in the project.
+**FlowForge — Concurrent HTTP Load Balancer | Java, Spring Boot, Maven, JUnit**
 
-## Project Structure
-
-```text
-flowforge/
-├── .mvn/
-│   └── wrapper/                  # Maven Wrapper configuration
-├── src/
-│   ├── main/
-│   │   ├── java/com/flowforge/
-│   │   │   ├── FlowforgeApplication.java
-│   │   │   └── core/
-│   │   │       ├── BackendProperties.java
-│   │   │       ├── BackendServer.java
-│   │   │       ├── BackendUnavailableException.java
-│   │   │       ├── GlobalExceptionHandler.java
-│   │   │       ├── HealthCheckService.java
-│   │   │       ├── LoadBalancer.java
-│   │   │       ├── LoadBalancerConfig.java
-│   │   │       ├── LoadBalancingStrategy.java
-│   │   │       ├── ProxyController.java
-│   │   │       └── ProxyService.java
-│   │   └── resources/
-│   │       └── application.properties
-│   └── test/
-│       └── java/com/flowforge/
-│           └── FlowforgeApplicationTests.java
-├── .gitignore
-├── HELP.md
-├── mvnw
-├── mvnw.cmd
-├── pom.xml
-└── README.md
-```
-
-### Key Components
-
-- **`LoadBalancer.java`** — Selects a backend according to the configured load-balancing strategy.
-- **`LoadBalancingStrategy.java`** — Defines the supported load-balancing strategies.
-- **`BackendServer.java`** — Represents a backend server and tracks its health and active connections.
-- **`HealthCheckService.java`** — Periodically checks backend health.
-- **`ProxyController.java`** — Exposes the HTTP proxy endpoint.
-- **`ProxyService.java`** — Forwards incoming requests to the selected backend.
-- **`BackendProperties.java`** — Binds backend configuration from application properties.
-- **`LoadBalancerConfig.java`** — Configures backend server instances.
-- **`GlobalExceptionHandler.java`** — Handles errors such as when no healthy backend is available.
-- **`application.properties`** — Configures backend URLs, weights, and load-balancing behavior.
-
-## Future Improvements
-
-- Add automated unit and integration tests for all load-balancing strategies.
-- Add concurrent-load and stress testing.
-- Improve HTTP header and response-body forwarding.
-- Add metrics and monitoring dashboards.
-- Add Docker support and deployment automation.
+- Built a configurable HTTP reverse proxy with round-robin, weighted round-robin, and least-connections routing across multiple backend instances.
+- Removed global synchronization from backend selection and implemented concurrent health probes, configurable request timeouts, and bounded failover for retry-safe requests.
+- Added concurrent distribution and routing-strategy tests; benchmark throughput and p95 latency under increasing concurrent loads before adding quantitative performance claims.
 
 ## License
 
-This project is available for educational and portfolio purposes. Add a license if you intend to distribute it under specific reuse terms.
+This project is currently intended for educational and portfolio use. Add an explicit license if you want to grant others defined reuse permissions.
