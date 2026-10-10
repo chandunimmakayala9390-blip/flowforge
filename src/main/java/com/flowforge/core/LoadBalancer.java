@@ -14,6 +14,7 @@ public class LoadBalancer {
     private final LoadBalancingStrategy strategy;
     private final AtomicInteger currentIndex = new AtomicInteger();
     private final AtomicInteger weightedIndex = new AtomicInteger();
+    private final AtomicInteger leastConnectionsIndex = new AtomicInteger();
 
     public LoadBalancer(List<BackendServer> servers, LoadBalancingStrategy strategy) {
         this.servers = List.copyOf(servers);
@@ -42,16 +43,18 @@ public class LoadBalancer {
     }
 
     private BackendServer selectLeastConnections(List<BackendServer> healthyServers) {
-        return healthyServers.stream()
-                .min((a, b) -> {
-                    int byConnections = Integer.compare(
-                            a.getActiveConnections(), b.getActiveConnections());
-                    if (byConnections != 0) {
-                        return byConnections;
-                    }
-                    return Integer.compare(servers.indexOf(a), servers.indexOf(b));
-                })
+        int minimum = healthyServers.stream()
+                .mapToInt(BackendServer::getActiveConnections)
+                .min()
                 .orElseThrow();
+
+        List<BackendServer> leastBusy = healthyServers.stream()
+                .filter(server -> server.getActiveConnections() == minimum)
+                .toList();
+
+        int index = Math.floorMod(
+                leastConnectionsIndex.getAndIncrement(), leastBusy.size());
+        return leastBusy.get(index);
     }
 
     private BackendServer selectWeightedRoundRobin(List<BackendServer> healthyServers) {
