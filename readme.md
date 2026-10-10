@@ -13,8 +13,6 @@ FlowForge is a Java 25 and Spring Boot HTTP reverse proxy that distributes incom
 - **HTTP reverse proxy:** Handles GET, HEAD, POST, PUT, DELETE, PATCH, and OPTIONS; preserves query strings and forwards end-to-end request/response headers.
 - **Graceful failure:** Returns HTTP 503 if no healthy backend is available or all allowed attempts fail.
 
-Performance numbers are intentionally not claimed in this README until load tests have been run and recorded on a specific machine.
-
 ## Tech stack
 
 - Java 25
@@ -23,6 +21,7 @@ Performance numbers are intentionally not claimed in this README until load test
 - Spring Boot Actuator
 - Maven Wrapper
 - JUnit 5
+- k6 for local load testing
 
 ## Requirements
 
@@ -61,16 +60,16 @@ Verify health and proxy requests:
 
 ## Configuration
 
-All settings are in src/main/resources/application.properties.
+All settings are in `src/main/resources/application.properties`.
 
 | Property | Default | Description |
 |---|---:|---|
-| flowforge.load-balancer.strategy | WEIGHTED_ROUND_ROBIN | ROUND_ROBIN, WEIGHTED_ROUND_ROBIN, or LEAST_CONNECTIONS |
-| flowforge.proxy.connect-timeout-ms | 1000 | Backend connection timeout in milliseconds |
-| flowforge.proxy.read-timeout-ms | 3000 | Backend response-read timeout in milliseconds |
-| flowforge.proxy.max-attempts | 2 | Maximum attempts for retry-safe methods |
-| flowforge.health-check.interval-ms | 5000 | Delay between health-check cycles |
-| flowforge.health-check.timeout-ms | 800 | Health-probe connect/read timeout |
+| `flowforge.load-balancer.strategy` | `WEIGHTED_ROUND_ROBIN` | `ROUND_ROBIN`, `WEIGHTED_ROUND_ROBIN`, or `LEAST_CONNECTIONS` |
+| `flowforge.proxy.connect-timeout-ms` | 1000 | Backend connection timeout in milliseconds |
+| `flowforge.proxy.read-timeout-ms` | 3000 | Backend response-read timeout in milliseconds |
+| `flowforge.proxy.max-attempts` | 2 | Maximum attempts for retry-safe methods |
+| `flowforge.health-check.interval-ms` | 5000 | Delay between health-check cycles |
+| `flowforge.health-check.timeout-ms` | 800 | Health-probe connect/read timeout |
 
 FlowForge marks a backend unhealthy when a proxied transport request fails. The scheduled health checker can mark it healthy again after its Actuator health endpoint responds successfully.
 
@@ -87,22 +86,32 @@ Then stop one backend, wait for a health-check cycle, and send requests again. R
 
 ## Load testing
 
-For a reproducible concurrency test, use k6 or Apache JMeter to send traffic to:
-
-    http://localhost:8080/proxy/backend-test
-
-An initial repeatable run is included at tests/load/flowforge.js. With k6 installed and the proxy plus both backends running, start it with:
+The included k6 script is at `tests/load/flowforge.js`. Start the proxy and both backends, then run:
 
     k6 run tests/load/flowforge.js
 
-The script ramps through 10, 25, 50, and 100 virtual users and checks error rate and p95 latency. Its thresholds are starter guardrails; adjust them to fit your machine and workload. For a manual comparison, increase virtual users in stages and keep each run long enough to reach steady behavior (such as 60 seconds). Record:
+The script ramps through 10, 25, 50, and 100 virtual users and checks the HTTP error rate and p95 latency. For shorter controlled runs, you can override the script's load profile:
 
-- Throughput in requests per second
-- p50, p95, and p99 response latency
-- Error rate and HTTP status distribution
-- CPU and memory of the proxy and backend processes
+    k6 run --vus 10 --duration 30s tests/load/flowforge.js
 
-Keep the test machine, workload, duration, and backend count constant when comparing revisions. Only add measured throughput/latency figures to your resume after running the benchmark. Local results support comparisons on your machine; they do not guarantee production capacity.
+### Initial local measurements
+
+Initial measurements were collected on **Windows 11**, using **Java 25.0.1**, **k6 2.2.0**, one FlowForge proxy, and two local backend instances on the same machine. These are local observations, not production-capacity claims.
+
+| Virtual users | Duration | Requests/sec reported by k6 | p95 latency | Failed HTTP requests | Outcome |
+|---:|---:|---:|---:|---:|---|
+| 10 | 30 s | 5,981.13 | 2.53 ms | 0.00% | Both configured thresholds passed |
+| 25 | 30 s | 2,623.93 | 9.76 ms | 12.18% | Failed error-rate threshold |
+| 100 (ramped test) | 2 min | 2,175.71 | 5.79 ms | 15.23% | Failed error-rate threshold |
+
+**Interpretation and limitations**
+
+- The 10-VU run completed 179,441 requests with 0% reported HTTP request failures and passed the script's configured thresholds.
+- The 25-VU and ramped 100-VU runs reported Windows socket errors: `Only one usage of each socket address (protocol/network address/port) is normally permitted`. Their failure rates mean these runs did not pass the reliability target.
+- The socket errors suggest a local connection/resource issue may be involved, but the cause has **not** been confirmed. These measurements do not establish FlowForge's maximum capacity or prove that the proxy itself is the bottleneck.
+- Treat the figures as preliminary until the higher-concurrency test environment is diagnosed and the benchmark is repeated. Results from localhost depend on the machine, workload, and test setup.
+
+For meaningful comparisons between code changes, keep the machine, workload, duration, and backend count constant. Record throughput, p50/p95/p99 latency, HTTP error rate/status distribution, and proxy/backend CPU and memory. Do not present preliminary local measurements as production performance.
 
 ## Tests
 
@@ -110,7 +119,7 @@ Run all tests:
 
     .\mvnw.cmd clean test
 
-Load-balancer tests cover concurrent round-robin distribution, weighted distribution, least-connections selection, unhealthy-backend filtering, and the no-healthy-backend case.
+The current test run completed successfully: **6 tests, 0 failures, 0 errors**. Load-balancer tests cover concurrent round-robin distribution, weighted distribution, least-connections selection, unhealthy-backend filtering, and the no-healthy-backend case.
 
 ## Project structure
 
@@ -136,11 +145,11 @@ Load-balancer tests cover concurrent round-robin distribution, weighted distribu
 
 ## Resume summary
 
-**FlowForge — Concurrent HTTP Load Balancer | Java, Spring Boot, Maven, JUnit**
+**FlowForge — Concurrent HTTP Load Balancer | Java, Spring Boot, Maven, JUnit, k6**
 
 - Built a configurable HTTP reverse proxy with round-robin, weighted round-robin, and least-connections routing across multiple backend instances.
-- Removed global synchronization from backend selection and implemented concurrent health probes, configurable request timeouts, and bounded failover for retry-safe requests.
-- Added concurrent distribution and routing-strategy tests; benchmark throughput and p95 latency under increasing concurrent loads before adding quantitative performance claims.
+- Implemented concurrent backend selection, concurrent health probes, configurable request timeouts, and bounded failover for retry-safe requests; verified routing and failover behavior.
+- Added unit tests (6/6 passing) and a local k6 benchmark. An initial 10-VU, 30-second run reported 5,981 requests/sec, 2.53 ms p95 latency, and 0% HTTP request failures; higher-concurrency runs remain under investigation.
 
 ## License
 
