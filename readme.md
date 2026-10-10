@@ -91,7 +91,11 @@ For a reproducible concurrency test, use k6 or Apache JMeter to send traffic to:
 
     http://localhost:8080/proxy/backend-test
 
-Increase virtual users in stages—for example 10, 25, 50, then 100—and keep each run long enough to reach steady behavior (such as 60 seconds). Record:
+An initial repeatable run is included at tests/load/flowforge.js. With k6 installed and the proxy plus both backends running, start it with:
+
+    k6 run tests/load/flowforge.js
+
+The script ramps through 10, 25, 50, and 100 virtual users and checks error rate and p95 latency. Its thresholds are starter guardrails; adjust them to fit your machine and workload. For a manual comparison, increase virtual users in stages and keep each run long enough to reach steady behavior (such as 60 seconds). Record:
 
 - Throughput in requests per second
 - p50, p95, and p99 response latency
@@ -126,7 +130,8 @@ Load-balancer tests cover concurrent round-robin distribution, weighted distribu
     │       ├── ProxyController.java
     │       └── ProxyService.java
     ├── src/main/resources/application.properties
-    ├── src/test/java/com/flowforge/
+    ├── src/test/java/com/flowforge/core/LoadBalancerTest.java
+    ├── tests/load/flowforge.js
     └── pom.xml
 
 ## Resume summary
