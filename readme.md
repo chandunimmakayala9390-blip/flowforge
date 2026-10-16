@@ -143,13 +143,6 @@ The current test run completed successfully: **6 tests, 0 failures, 0 errors**. 
     ├── tests/load/flowforge.js
     └── pom.xml
 
-## Resume summary
-
-**FlowForge — Concurrent HTTP Load Balancer | Java, Spring Boot, Maven, JUnit, k6**
-
-- Built a configurable HTTP reverse proxy with round-robin, weighted round-robin, and least-connections routing across multiple backend instances.
-- Implemented concurrent backend selection, concurrent health probes, configurable request timeouts, and bounded failover for retry-safe requests; verified routing and failover behavior.
-- Added unit tests (6/6 passing) and a local k6 benchmark. An initial 10-VU, 30-second run reported 5,981 requests/sec, 2.53 ms p95 latency, and 0% HTTP request failures; higher-concurrency runs remain under investigation.
 
 ## License
 
